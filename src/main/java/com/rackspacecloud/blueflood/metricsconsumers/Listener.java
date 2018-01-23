@@ -31,6 +31,19 @@ public class Listener {
 
         String[] strArray = ((String) record.value()).split(" ");
 
+        // Based on telegraf's line protocol this should always be 3.
+        // Following is line protocol schema:
+        // measurementName,tagstring fieldstring timestamp
+        if(strArray.length != 3) {
+            LOGGER.error("Message '{}' doesn't follow line telegraf's protocol.", record.value());
+        }
+        else {
+            processMessage(strArray);
+            latch.countDown();
+        }
+    }
+
+    private void processMessage(String[] strArray) {
         String tagsString = strArray[0];
         String fieldString = strArray[1];
         long eventTime = Long.parseLong(strArray[2].trim());
@@ -38,39 +51,51 @@ public class Listener {
         String[] tagsArray = tagsString.split(",");
         String measurementName = tagsArray[0];
 
-        if(measurementName.equalsIgnoreCase("cpu")){
-            String msgToSend = processCpu(tagsArray, fieldString, eventTime);
-            sender.send("cpu", msgToSend);
-        }
+        Map<String, String> metricsMap = getMetricsMap(tagsArray, fieldString);
 
-        latch.countDown();
+        switch (measurementName.toLowerCase()) {
+            case "cpu":
+                String msgToSend = processCpu(metricsMap, eventTime, measurementName);
+                sender.send("cpu", msgToSend);
+                break;
+
+            case "mem":
+                msgToSend = processMem(metricsMap, eventTime, measurementName);
+                sender.send("mem", msgToSend);
+                break;
+
+            case "disk":
+                if (metricsMap.get("path").equalsIgnoreCase("/")) {
+                    msgToSend = processDisk(metricsMap, eventTime, measurementName);
+                    sender.send("disk", msgToSend);
+                }
+                break;
+
+            case "diskio":
+                msgToSend = processDiskIO(metricsMap, eventTime, measurementName);
+                sender.send("diskio", msgToSend);
+                break;
+
+            default:
+                LOGGER.error("{} measurement type is not supported at this time.", measurementName);
+        }
     }
 
-    public String processCpu(String[] tagsArray, String fieldString, long eventTime){
-        Map<String, String> metricsMap = new HashMap<>();
+    public String processCpu(Map<String, String> metricsMap, long eventTime, String measurementName){
+        Map<String, Object> objToSend = getCpuMap(eventTime, measurementName, metricsMap);
+        String result = getMessageToSend(objToSend);
 
-        for (int i = 1; i < tagsArray.length; i++) {
-            String[] kvPair = tagsArray[i].split("=");
-            metricsMap.put(kvPair[0], kvPair[1]);
-        }
+        return result;
+    }
 
-        String[] fieldsArray = fieldString.split(",");
-        for (int i = 0; i < fieldsArray.length; i++) {
-            String[] kvPair = fieldsArray[i].split("=");
-            metricsMap.put(kvPair[0], kvPair[1]);
-        }
+    public String processMem(Map<String, String> metricsMap, long eventTime, String measurementName){
+        Map<String, Object> objToSend = getMemMap(eventTime, measurementName, metricsMap);
+        String result = getMessageToSend(objToSend);
 
-        Map<String, Object> objToSend = new HashMap<>();
+        return result;
+    }
 
-        String measureKey = "usage_user";
-        objToSend.put("metricName", String.format("%s.%s.%s.%s",
-                metricsMap.get("tenantId"),
-                metricsMap.get("dc"),
-                metricsMap.get("rack"),
-                measureKey));
-        objToSend.put("metricValue", Double.parseDouble(metricsMap.get(measureKey)));
-        objToSend.put("collectionTime", eventTime);
-
+    private String getMessageToSend(Map<String, Object> objToSend) {
         String result = "";
         ObjectMapper mapper = new ObjectMapper();
         try {
@@ -78,7 +103,111 @@ public class Listener {
         } catch (JsonProcessingException e) {
             e.printStackTrace();
         }
+        return result;
+    }
+
+    private Map<String, Object> getCpuMap(long eventTime, String measurementName, Map<String, String> metricsMap) {
+        Map<String, Object> objToSend = new HashMap<>();
+
+        String measureKey = "usage_user";
+        objToSend.put("metricName", String.format("%s.%s.%s.%s.%s.%s",
+                metricsMap.get("tenantId"),
+                metricsMap.get("dc"),
+                metricsMap.get("rack"),
+                metricsMap.get("host"),
+                measurementName,
+                measureKey));
+        objToSend.put("metricValue", Double.parseDouble(metricsMap.get(measureKey)));
+        objToSend.put("collectionTime", eventTime);
+        return objToSend;
+    }
+
+    private Map<String, String> getMetricsMap(String[] tagsArray, String fieldString) {
+        Map<String, String> metricsMap = new HashMap<>();
+
+        for (int i = 1; i < tagsArray.length; i++) {
+            String[] kvPair = tagsArray[i].split("=");
+            String temp = kvPair[1].replace(".", "_");
+            metricsMap.put(kvPair[0], temp);
+        }
+
+        String[] fieldsArray = fieldString.split(",");
+        for (int i = 0; i < fieldsArray.length; i++) {
+            String[] kvPair = fieldsArray[i].split("=");
+            metricsMap.put(kvPair[0], kvPair[1]);
+        }
+        return metricsMap;
+    }
+
+    private Map<String, Object> getMemMap(long eventTime, String measurementName,
+                                          Map<String, String> metricsMap) {
+        Map<String, Object> objToSend = new HashMap<>();
+
+        String measureKey = "used_percent";
+        objToSend.put("metricName", String.format("%s.%s.%s.%s.%s.%s",
+                metricsMap.get("tenantId"),
+                metricsMap.get("dc"),
+                metricsMap.get("rack"),
+                metricsMap.get("host"),
+                measurementName,
+                measureKey));
+        objToSend.put("metricValue", Double.parseDouble(metricsMap.get(measureKey)));
+        objToSend.put("collectionTime", eventTime);
+        return objToSend;
+    }
+
+
+    private Map<String, Object> getDiskMap(long eventTime, String measurementName,
+                                          Map<String, String> metricsMap) {
+        Map<String, Object> objToSend = new HashMap<>();
+
+        String measureKey = "used_percent";
+        objToSend.put("metricName", String.format("%s.%s.%s.%s.%s.%s",
+                metricsMap.get("tenantId"),
+                metricsMap.get("dc"),
+                metricsMap.get("rack"),
+                metricsMap.get("host"),
+                measurementName,
+                measureKey));
+        objToSend.put("metricValue", Double.parseDouble(metricsMap.get(measureKey)));
+        objToSend.put("collectionTime", eventTime);
+        return objToSend;
+    }
+
+    public String processDisk(Map<String, String> metricsMap, long eventTime, String measurementName){
+        Map<String, Object> objToSend = getDiskMap(eventTime, measurementName, metricsMap);
+        String result = getMessageToSend(objToSend);
 
         return result;
     }
+
+    private Map<String, Object> getDiskIOMap(long eventTime, String measurementName,
+                                           Map<String, String> metricsMap) {
+        Map<String, Object> objToSend = new HashMap<>();
+
+        String measureKey = "iops_in_progress";
+        objToSend.put("metricName", String.format("%s.%s.%s.%s.%s.%s",
+                metricsMap.get("tenantId"),
+                metricsMap.get("dc"),
+                metricsMap.get("rack"),
+                metricsMap.get("host"),
+                measurementName,
+                measureKey));
+        String temp = metricsMap.get(measureKey);
+        temp = temp.substring(0, temp.length()-1);
+        objToSend.put("metricValue", Integer.parseInt(temp));
+        objToSend.put("collectionTime", eventTime);
+        return objToSend;
+    }
+
+    public String processDiskIO(Map<String, String> metricsMap, long eventTime, String measurementName){
+        Map<String, Object> objToSend = getDiskIOMap(eventTime, measurementName, metricsMap);
+        String result = getMessageToSend(objToSend);
+
+        return result;
+    }
+
 }
+
+
+
