@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -53,10 +54,14 @@ public class Listener {
 
         Map<String, String> metricsMap = getMetricsMap(tagsArray, fieldString);
 
+        String msgToSend = "";
+
         switch (measurementName.toLowerCase()) {
             case "cpu":
-                String msgToSend = processCpu(metricsMap, eventTime, measurementName);
-                sender.send("cpu", msgToSend);
+                if (metricsMap.get("cpu").equalsIgnoreCase("cpu-total")) {
+                    msgToSend = processCpu(metricsMap, eventTime, measurementName);
+                    sender.send("cpu", msgToSend);
+                }
                 break;
 
             case "mem":
@@ -79,6 +84,9 @@ public class Listener {
             default:
                 LOGGER.error("{} measurement type is not supported at this time.", measurementName);
         }
+
+        if(!StringUtils.isEmpty(msgToSend))
+            sender.send("blueflood-metrics", msgToSend);
     }
 
     public String processCpu(Map<String, String> metricsMap, long eventTime, String measurementName){
