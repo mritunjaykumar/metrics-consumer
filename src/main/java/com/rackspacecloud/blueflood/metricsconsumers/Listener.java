@@ -6,6 +6,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -16,6 +17,9 @@ import java.util.concurrent.CountDownLatch;
 
 @Component
 public class Listener {
+    @Value("${kafka.topic.blueflood.metrics}")
+    private String kafkaTopicBluefloodMetrics;
+
     private static final Logger LOGGER =
             LoggerFactory.getLogger(Listener.class);
 
@@ -27,8 +31,6 @@ public class Listener {
     @KafkaListener(topics = "telegraf")
     public void listenTelegraf(ConsumerRecord<?, ?> record){
         LOGGER.info("received payload='{}'", record);
-        System.out.println("Listener id01 thread id:" + Thread.currentThread().getId());
-        System.out.println("Record:" + record);
 
         String[] strArray = ((String) record.value()).split(" ");
 
@@ -86,7 +88,7 @@ public class Listener {
         }
 
         if(!StringUtils.isEmpty(msgToSend))
-            sender.send("blueflood-metrics", msgToSend);
+            sender.send(kafkaTopicBluefloodMetrics, msgToSend);
     }
 
     public String processCpu(Map<String, String> metricsMap, long eventTime, String measurementName){
@@ -214,7 +216,6 @@ public class Listener {
 
         return result;
     }
-
 }
 
 
