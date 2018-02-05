@@ -20,8 +20,7 @@ public class Listener {
     @Value("${kafka.topic.blueflood.metrics}")
     private String kafkaTopicBluefloodMetrics;
 
-    private static final Logger LOGGER =
-            LoggerFactory.getLogger(Listener.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(Listener.class);
 
     private CountDownLatch latch = new CountDownLatch(1);
 
@@ -62,25 +61,25 @@ public class Listener {
             case "cpu":
                 if (metricsMap.get("cpu").equalsIgnoreCase("cpu-total")) {
                     msgToSend = processCpu(metricsMap, eventTime, measurementName);
-                    sender.send("cpu", msgToSend);
+//                    sender.send("cpu", msgToSend);
                 }
                 break;
 
             case "mem":
                 msgToSend = processMem(metricsMap, eventTime, measurementName);
-                sender.send("mem", msgToSend);
+//                sender.send("mem", msgToSend);
                 break;
 
             case "disk":
                 if (metricsMap.get("path").equalsIgnoreCase("/")) {
                     msgToSend = processDisk(metricsMap, eventTime, measurementName);
-                    sender.send("disk", msgToSend);
+//                    sender.send("disk", msgToSend);
                 }
                 break;
 
             case "diskio":
                 msgToSend = processDiskIO(metricsMap, eventTime, measurementName);
-                sender.send("diskio", msgToSend);
+//                sender.send("diskio", msgToSend);
                 break;
 
             default:
