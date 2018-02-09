@@ -13,11 +13,12 @@ import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 
 @Component
 public class Listener {
-    @Value("${kafka.topic.blueflood.metrics}")
+    @Value("${kafka.topics.out.blueflood}")
     private String kafkaTopicBluefloodMetrics;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(Listener.class);
@@ -27,9 +28,12 @@ public class Listener {
     @Autowired
     Sender sender;
 
-    @KafkaListener(topics = "telegraf")
+    @KafkaListener(topics = "#{'${kafka.topics.in}'.split(',')}")
     public void listenTelegraf(ConsumerRecord<?, ?> record){
-        LOGGER.info("received payload='{}'", record);
+        String trackingId = UUID.randomUUID().toString();
+        LOGGER.info("TrackingId:{}, START: Processing", trackingId);
+
+        LOGGER.debug("TrackingId:{}, Received payload:{}", trackingId, record);
 
         String[] strArray = ((String) record.value()).split(" ");
 
@@ -37,15 +41,17 @@ public class Listener {
         // Following is line protocol schema:
         // measurementName,tagstring fieldstring timestamp
         if(strArray.length != 3) {
-            LOGGER.error("Message '{}' doesn't follow line telegraf's protocol.", record.value());
+            LOGGER.error("TrackingId:{}, Message doesn't follow line protocol: [{}]", trackingId, record.value());
         }
         else {
-            processMessage(strArray);
+            processMessage(trackingId, strArray);
             latch.countDown();
         }
+
+        LOGGER.info("TrackingId:{}, FINISH: Processing", trackingId);
     }
 
-    private void processMessage(String[] strArray) {
+    private void processMessage(String trackingId, String[] strArray) {
         String tagsString = strArray[0];
         String fieldString = strArray[1];
         long eventTime = Long.parseLong(strArray[2].trim());
@@ -83,11 +89,12 @@ public class Listener {
                 break;
 
             default:
-                LOGGER.error("{} measurement type is not supported at this time.", measurementName);
+                LOGGER.error("TrackingId:{}, [{}] measurement type is not supported at this time.",
+                        trackingId, measurementName);
         }
 
         if(!StringUtils.isEmpty(msgToSend))
-            sender.send(kafkaTopicBluefloodMetrics, msgToSend);
+            sender.send(trackingId, kafkaTopicBluefloodMetrics, msgToSend);
     }
 
     public String processCpu(Map<String, String> metricsMap, long eventTime, String measurementName){
